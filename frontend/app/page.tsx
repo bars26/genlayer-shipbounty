@@ -1,11 +1,11 @@
 "use client";
 
 import { useState } from "react";
-import { FileText, Loader2, Mic, Radio, RefreshCw, Wallet } from "lucide-react";
-import { DealCard } from "@/components/DealCard";
-import { EpisodeCheck } from "@/components/EpisodeCheck";
+import { CircleDollarSign, GitMerge, Loader2, RefreshCw, Smartphone, Wallet } from "lucide-react";
+import { BountyCard } from "@/components/BountyCard";
+import { IssueCheck, type OpenPrefill } from "@/components/IssueCheck";
 import { Navbar } from "@/components/Navbar";
-import { OpenDealModal, type DealPrefill } from "@/components/OpenDealModal";
+import { OpenBountyModal } from "@/components/OpenBountyModal";
 import { OwedCard } from "@/components/OwedCard";
 import { TransactionPanel } from "@/components/TransactionPanel";
 import { Button } from "@/components/ui/button";
@@ -13,20 +13,21 @@ import { formatGen, wei } from "@/lib/contracts/types";
 import { useRegistry } from "@/lib/hooks/useShipBounty";
 
 const STEPS = [
-  { icon: Wallet, title: "Book reads", body: "A sponsor funds host-read messages on a show: its brand, an optional promo code, the talking points, a publication window, a price per read." },
-  { icon: Mic, title: "The host reads it", body: "The episode goes out with its Podcasting 2.0 transcript. Anyone submits it: the episode's guid in the show's feed." },
-  { icon: FileText, title: "Validators read the episode", body: "The feed, Apple's directory and the transcript. Code finds the brand and the code; the model judges if the passage is a sponsor message with every point." },
-  { icon: Radio, title: "Paid once it stays up", body: "Anyone may dispute a held read with a stake. After the survival period the episode is read again and the show is paid at the wallet its own feed declares." },
+  { icon: CircleDollarSign, title: "Back an issue", body: "Users put GEN on a GitHub issue of an open-source iOS app: a bug they want fixed or a feature they want. Anyone can add to it." },
+  { icon: GitMerge, title: "A developer fixes it", body: "Someone writes the change; the maintainers merge it and close the issue. Merged is not shipped yet." },
+  { icon: Smartphone, title: "It ships", body: "Validators read the issue, the change, GitHub's releases and the App Store: the version users have must contain the fix. The model checks the change delivers the issue." },
+  { icon: Wallet, title: "The author is paid", body: "After a week in the App Store (and a stake-backed dispute window) the bounty goes to the GenLayer wallet in the author's GitHub bio." },
 ];
 
 export default function HomePage() {
-  const { deals, reads, isLoading, isError, error, isFetching, refetch, fetchedAt } = useRegistry();
+  const { bounties, claims, isLoading, isError, error, isFetching, refetch, fetchedAt } = useRegistry();
   const [modal, setModal] = useState(false);
-  const [prefill, setPrefill] = useState<DealPrefill | null>(null);
-  const ordered = [...deals].sort((a, b) => Number(b.id.split("_")[1]) - Number(a.id.split("_")[1]));
-  const booked = deals.filter((d) => d.state === "open").reduce((t, d) => t + wei(d.budget) + wei(d.reserved), 0n);
-  const delivered = reads.filter((r) => r.verdict === "DELIVERED").length;
-  const paid = deals.reduce((t, d) => t + wei(d.paid_total), 0n);
+  const [prefill, setPrefill] = useState<OpenPrefill | null>(null);
+  const [focus, setFocus] = useState("");
+  const ordered = [...bounties].sort((a, b) => Number(b.id.split("_")[1]) - Number(a.id.split("_")[1]));
+  const backed = bounties.filter((b) => b.state === "open" || b.state === "held").reduce((t, b) => t + wei(b.pot) + wei(b.reserved), 0n);
+  const shipped = claims.filter((c) => c.verdict === "SHIPPED").length;
+  const paid = bounties.reduce((t, b) => t + wei(b.paid_total), 0n);
 
   return (
     <div className="min-h-screen flex flex-col">
@@ -35,20 +36,20 @@ export default function HomePage() {
         <div className="max-w-6xl mx-auto space-y-10">
           <section className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
             <div className="lg:col-span-5 space-y-4 lg:pt-6">
-              <p className="text-xs font-semibold uppercase tracking-[0.2em] text-[#E4503F]">● Host-read podcast ads, paid when they air</p>
-              <h1 className="display text-5xl md:text-6xl leading-[1.02]">Did the host actually read it?</h1>
+              <p className="text-xs font-semibold uppercase tracking-[0.2em] text-[#0A84FF]">Issue bounties for open-source iOS apps</p>
+              <h1 className="display text-5xl md:text-6xl leading-[1.02]">Paid when it ships, not when it merges.</h1>
               <p className="text-lg text-muted-foreground">
-                Independent shows sell host-read ads on trust and invoices; sponsors check by listening. ReadProof escrows the fee in GEN, and
-                GenLayer validators read the episode&apos;s own transcript, the show&apos;s feed and Apple&apos;s directory before the show is paid.
+                Back a GitHub issue with GEN. GenLayer validators follow the fix from the issue to the pull request, to the release, to the
+                version the App Store actually offers, and pay the developer who wrote it once users have it.
               </p>
               <dl className="flex gap-8 pt-1">
                 <div>
-                  <dt className="text-xs text-muted-foreground">GEN in open deals</dt>
-                  <dd className="display text-3xl">{formatGen(booked, 1)}</dd>
+                  <dt className="text-xs text-muted-foreground">GEN on issues</dt>
+                  <dd className="display text-3xl">{formatGen(backed, 1)}</dd>
                 </div>
                 <div>
-                  <dt className="text-xs text-muted-foreground">reads delivered</dt>
-                  <dd className="display text-3xl">{delivered}</dd>
+                  <dt className="text-xs text-muted-foreground">fixes shipped</dt>
+                  <dd className="display text-3xl">{shipped}</dd>
                 </div>
                 <div>
                   <dt className="text-xs text-muted-foreground">GEN paid</dt>
@@ -57,7 +58,17 @@ export default function HomePage() {
               </dl>
             </div>
             <div className="lg:col-span-7">
-              <EpisodeCheck deals={deals} onBook={(p) => { setPrefill(p); setModal(true); }} />
+              <IssueCheck
+                bounties={bounties}
+                onOpen={(p) => {
+                  setPrefill(p);
+                  setModal(true);
+                }}
+                onBack={(b) => {
+                  setFocus(b.id);
+                  document.getElementById(b.id)?.scrollIntoView({ behavior: "smooth", block: "center" });
+                }}
+              />
             </div>
           </section>
 
@@ -66,8 +77,8 @@ export default function HomePage() {
               {STEPS.map(({ icon: Icon, title, body }, i) => (
                 <li key={title} className="rounded-2xl border border-border bg-white/60 p-4">
                   <div className="flex items-center gap-2">
-                    <span className="display flex h-7 w-7 items-center justify-center rounded-full bg-[#1F1A33] text-sm text-white">{i + 1}</span>
-                    <Icon className="w-4 h-4 text-[#E4503F]" />
+                    <span className="display flex h-7 w-7 items-center justify-center rounded-full bg-[#0F1B2D] text-sm text-white">{i + 1}</span>
+                    <Icon className="w-4 h-4 text-[#0A84FF]" />
                     <span className="font-semibold">{title}</span>
                   </div>
                   <p className="mt-2 text-sm text-muted-foreground">{body}</p>
@@ -75,16 +86,16 @@ export default function HomePage() {
               ))}
             </ol>
             <p className="mt-3 text-xs text-muted-foreground">
-              Looking needs no wallet. To book reads or submit an episode, connect MetaMask and press Test GEN for free GenLayer Studio tokens. The deals
-              below are demo deals funded by test wallets with test GEN, not offers from these sponsors or to these shows; the feeds, episodes and
-              transcripts they check are real.
+              Looking needs no wallet. To back an issue or claim a bounty, connect MetaMask and press Test GEN for free GenLayer Studio tokens. The
+              bounties below are demo bounties funded by test wallets with test GEN, not offers to these developers; the issues, changes, releases
+              and App Store versions they check are real.
             </p>
           </section>
 
           <section className="grid grid-cols-1 lg:grid-cols-12 gap-8">
             <div className="lg:col-span-8 space-y-5">
               <div className="flex items-center justify-between">
-                <h2 className="display text-3xl">Deals</h2>
+                <h2 className="display text-3xl">Bounties</h2>
                 <div className="flex items-center gap-2 text-xs text-muted-foreground">
                   {fetchedAt && <span>updated {new Date(fetchedAt).toLocaleTimeString()}</span>}
                   <Button variant="ghost" size="sm" onClick={() => refetch()} disabled={isFetching} aria-label="Refresh">
@@ -92,44 +103,44 @@ export default function HomePage() {
                   </Button>
                 </div>
               </div>
-              {isLoading && <p className="text-sm text-muted-foreground">Reading the deals from GenLayer Studio…</p>}
-              {isError && <p className="rounded-xl border border-[#EEC3B6] bg-[#FBEFEA] p-3 text-sm">Could not read the deals: {error?.message}. Try Refresh in a minute.</p>}
-              {!isLoading && !isError && ordered.length === 0 && <p className="text-sm text-muted-foreground">No deal is booked yet. Book the first one.</p>}
-              {ordered.map((d) => (
-                <div id={d.id} key={d.id}>
-                  <DealCard deal={d} reads={reads.filter((r) => r.deal_id === d.id)} />
+              {isLoading && <p className="text-sm text-muted-foreground">Reading the bounties from GenLayer Studio…</p>}
+              {isError && <p className="rounded-xl border border-[#EEC3B6] bg-[#FBEFEA] p-3 text-sm">Could not read the bounties: {error?.message}. Try Refresh in a minute.</p>}
+              {!isLoading && !isError && ordered.length === 0 && <p className="text-sm text-muted-foreground">No bounty is open yet. Open the first one.</p>}
+              {ordered.map((b) => (
+                <div id={b.id} key={b.id}>
+                  <BountyCard bounty={b} claims={claims.filter((c) => c.bounty_id === b.id)} highlight={focus === b.id} />
                 </div>
               ))}
             </div>
             <aside className="lg:col-span-4 space-y-6">
               <div className="brand-card p-5 space-y-3 text-sm">
-                <h3 className="display text-xl">How a read is checked</h3>
+                <h3 className="display text-xl">How a claim is checked</h3>
                 <p>
-                  <strong>One show, two directories.</strong> When a deal is booked, validators check that Apple Podcasts lists the given id with exactly
-                  the given feed, so the feed and Apple describe the same show.
+                  <strong>The app is the repo&apos;s.</strong> When a bounty is opened, validators check the repository names the App Store app:
+                  its README or homepage links the app&apos;s id, or the app&apos;s seller website is the repository&apos;s homepage.
                 </p>
                 <p>
-                  <strong>The episode, from both.</strong> The submitted guid must be in the show&apos;s own feed, published inside the window, and
-                  Apple must list the same episode (by guid, by audio file, or by title within two days) with a date within two days of the
-                  feed&apos;s. A backdated or invented episode does not match.
+                  <strong>The fix, from the issue.</strong> The issue must be closed as completed. The change is the commit on its closing event
+                  (and that commit&apos;s pull request), or a merged pull request that says &ldquo;fixes #N&rdquo;. On an open issue, only a change
+                  merged after the bounty counts; a bounty on an issue already fixed is retroactive.
                 </p>
                 <p>
-                  <strong>The transcript, in code first.</strong> The episode&apos;s Podcasting 2.0 transcript (WebVTT, SRT, JSON, text or HTML) is
-                  fetched; code finds the sponsor&apos;s name and the promo code (spaces and punctuation ignored, as transcription splits codes).
+                  <strong>Shipped means users have it.</strong> Validators read the App Store&apos;s current version, find the GitHub release it
+                  corresponds to, and check (with GitHub&apos;s compare) that the change is in it, and that the App Store build is newer than the
+                  merge. Merged but unreleased, or released but not yet in the App Store, waits.
                 </p>
                 <p>
-                  <strong>The model judges only the passage.</strong> On up to three passages around the mentions, it says whether this is a sponsor
-                  message (not a passing or mocking mention) and which talking points it conveys. Every validator must reach the same answers.
+                  <strong>The model reads the change.</strong> Given the issue and the change&apos;s description, it says whether the change
+                  delivers what was asked, in part, or not at all. Only a full delivery is paid; every validator must agree.
                 </p>
                 <p>
-                  <strong>It must stay up.</strong> The price is reserved, then paid once the episode has stood the survival period and is still in
-                  the feed with the read in its transcript. Anyone can dispute before that with 10% of the price at stake: validators make the
-                  whole ruling again; upheld pays the disputer, dismissed pays the show.
+                  <strong>A week in users&apos; hands.</strong> The pot is reserved, then confirmed once the shipping version has been out the
+                  survival period, if the issue is still closed and the App Store still has the release. Anyone may dispute before that with 10% at
+                  stake: validators make the whole ruling again.
                 </p>
                 <p>
-                  <strong>The show is paid where it says.</strong> The price goes to the GenLayer wallet the show declares in its own feed
-                  (<span className="mono">&lt;podcast:txt purpose=&quot;genlayer&quot;&gt;</span>, the Podcasting 2.0 ownership tag), held until
-                  it does; only Withdraw sends GEN.
+                  <strong>The author is paid where they say.</strong> The bounty goes to the GenLayer wallet in the author&apos;s GitHub bio
+                  (&ldquo;GenLayer wallet: 0x…&rdquo;), held until they add one; unclaimed bounties go back to every backer after the deadline.
                 </p>
               </div>
               <OwedCard />
@@ -139,16 +150,16 @@ export default function HomePage() {
         </div>
       </main>
       <footer className="border-t border-border py-4 px-4 text-center text-sm text-muted-foreground">
-        Data: the shows&apos; own RSS feeds and transcripts, and Apple&apos;s public podcast directory, as published ·{" "}
+        Data: GitHub&apos;s public API and Apple&apos;s App Store lookup, as published ·{" "}
         <a href="https://genlayer.com" target="_blank" rel="noopener noreferrer" className="hover:text-foreground">
           Built on GenLayer
         </a>
         {" · "}
-        <a href="https://github.com/bars26/genlayer-readproof" target="_blank" rel="noopener noreferrer" className="hover:text-foreground">
+        <a href="https://github.com/bars26/genlayer-shipbounty" target="_blank" rel="noopener noreferrer" className="hover:text-foreground">
           Source
         </a>
       </footer>
-      <OpenDealModal open={modal} onOpenChange={setModal} prefill={prefill} />
+      <OpenBountyModal open={modal} onOpenChange={setModal} prefill={prefill} />
     </div>
   );
 }

@@ -159,7 +159,7 @@ export async function reconcile(c, label) {
   const t = JSON.parse(await read(c, "totals"));
   const onChain = await balance(CONTRACT);
   const ok = BigInt(t.expected_balance) === onChain;
-  reconciliations.push({ label, budgets: t.budgets, reserved: t.reserved, held: t.held, owed: t.owed, expected: t.expected_balance, balance: onChain.toString(), ok });
-  console.log(`  reconcile (${label}): budgets ${fmt(t.budgets)} + reserved ${fmt(t.reserved)} + held ${fmt(t.held)} + credited ${fmt(t.owed)} = ${fmt(t.expected_balance)} GEN; contract balance ${fmt(onChain)} GEN ${ok ? "OK" : "MISMATCH"}`);
+  reconciliations.push({ label, pots: t.pots, reserved: t.reserved, held: t.held, owed: t.owed, expected: t.expected_balance, balance: onChain.toString(), ok });
+  console.log(`  reconcile (${label}): pots ${fmt(t.pots)} + reserved ${fmt(t.reserved)} + held ${fmt(t.held)} + credited ${fmt(t.owed)} = ${fmt(t.expected_balance)} GEN; contract balance ${fmt(onChain)} GEN ${ok ? "OK" : "MISMATCH"}`);
   if (!ok) throw new Error("balance mismatch");
 }

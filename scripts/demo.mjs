@@ -36,25 +36,31 @@ let nextBounty = (await read(C.funder, "get_bounties", [0, 100])).length;
 let nextClaim = (await read(C.funder, "get_claims", [0, 200])).length;
 const bounties = {};
 const claims = {};
+// GitHub's keyless API allows 60 requests an hour per address, and Studio's validators share it with everyone else's
+// contracts: a reading that GitHub refuses changes nothing and is sent again later. Readings are spaced out.
+const patiently = async (fn) => {
+  for (let attempt = 1; ; attempt++) {
+    try {
+      const out = await fn();
+      await sleep(60_000);
+      return out;
+    } catch (err) {
+      if (attempt >= 5 || !/ERROR/.test(String(err?.message))) throw err;
+      console.log("  GitHub could not be read (keyless rate limit); waiting 15 minutes");
+      await sleep(900_000);
+    }
+  }
+};
 const open = async (label, [repo, apple], issue, amount, opts) => {
-  await write(C.funder, "funder", "open_bounty", [repo, issue, apple, "", DEADLINE, 7, amount], 0n, opts);
+  if (opts?.expectError) await write(C.funder, "funder", "open_bounty", [repo, issue, apple, "", DEADLINE, 7, amount], 0n, opts);
+  else await patiently(() => write(C.funder, "funder", "open_bounty", [repo, issue, apple, "", DEADLINE, 7, amount]));
   if (opts?.expectError) return null;
   const id = `bounty_${nextBounty++}`;
   bounties[id] = label;
   return id;
 };
 const claim = async (label, bountyId) => {
-  // GitHub's keyless API allows each validator 60 requests an hour: if it says no, wait and try again.
-  for (let attempt = 1; ; attempt++) {
-    try {
-      await write(C.scout, "scout", "claim", [bountyId]);
-      break;
-    } catch (err) {
-      if (attempt >= 3 || !/ERROR/.test(String(err?.message))) throw err;
-      console.log("  GitHub or Apple could not be read (rate limit?); waiting 10 minutes");
-      await sleep(600_000);
-    }
-  }
+  await patiently(() => write(C.scout, "scout", "claim", [bountyId]));
   const id = `claim_${nextClaim++}`;
   const c = await read(C.funder, "get_claim", [id]);
   console.log(`  -> ${id} ${label}: ${field(c, "verdict")} ${field(c, "code")}. ${field(c, "why")}`);
@@ -88,12 +94,12 @@ await reconcile(C.funder, "shipped claims reserved");
 
 // A reviewer disputes one shipped claim with a 10% stake: the whole ruling is made again. It stands: dismissed.
 await write(C.reviewer, "reviewer", "deposit", [], GEN / 10n);
-await write(C.reviewer, "reviewer", "dispute", [c2512]);
+await patiently(() => write(C.reviewer, "reviewer", "dispute", [c2512]));
 await write(C.reviewer, "reviewer", "dispute", [c2512], 0n, { expectError: true });
 await reconcile(C.funder, "a dismissed dispute: the stake reserved for the author");
 
 // Each shipping App Store version has been out a week: confirm. No author has a GenLayer wallet in their GitHub bio yet.
-for (const id of [c2512, c2469, c511]) await write(C.scout, "scout", "confirm", [id]);
+for (const id of [c2512, c2469, c511]) await patiently(() => write(C.scout, "scout", "confirm", [id]));
 await write(C.scout, "scout", "collect", [c2512], 0n, { expectError: true });
 await write(C.scout, "scout", "refund", [b2551], 0n, { expectError: true }); // its deadline is ahead
 await write(C.backer, "backer", "back", [b2512, half], 0n, { expectError: true }); // paid bounties take no more backing

@@ -1,145 +1,135 @@
-import type { ShowPreview } from "@/lib/contracts/types";
+import type { IssuePreview } from "@/lib/contracts/types";
 
 /**
- * A show's latest episodes as its own RSS feed lists them, with Apple's matching record and, when a sponsor's name (and
- * code) is given, how often each episode's transcript names it. The same rules the contract applies, run here without
- * validators or a model, so a sponsor or a show can see what will be submitted before paying for a transaction.
+ * What the contract will find for an issue, before anyone pays for a transaction: the issue, the change that closed it,
+ * the release the App Store's version corresponds to, and the App Store app the repository names. The same rules the
+ * contract applies, run here without validators or the model.
  */
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
 
-const HEADERS = { "user-agent": "ReadProof/1.0 (github.com/bars26/genlayer-readproof)" };
-const TYPES = ["text/vtt", "application/x-subrip", "application/srt", "application/json", "text/plain", "text/html"];
-const MAX_EPISODES = 12;
-const MAX_TRANSCRIPTS = 6;
+const GH = "https://api.github.com";
+const UA = "ShipBounty/1.0 (github.com/bars26/genlayer-shipbounty)";
 
-const decode = (s: string) =>
-  s.replace(/<!\[CDATA\[([\s\S]*?)\]\]>/g, "$1").replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, '"').replace(/&#39;/g, "'").trim();
-const tag = (xml: string, name: string) => decode(xml.match(new RegExp(`<${name}(?:\\s[^>]*)?>([\\s\\S]*?)</${name}>`, "i"))?.[1] ?? "");
-const attrs = (t: string) => Object.fromEntries([...t.matchAll(/([\w:-]+)="([^"]*)"/g)].map((m) => [m[1].toLowerCase(), decode(m[2])]));
-const norm = (u: string) => u.trim().toLowerCase().replace(/^https?:\/\/(www\.)?/, "").replace(/\/+$/, "");
-const words = (s: string) => ` ${s.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim()} `;
-const alnum = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, "");
-
-function rfc822(text: string): string {
-  const t = Date.parse(text);
-  return Number.isNaN(t) ? "" : new Date(t).toISOString().slice(0, 19);
+function headers(): Record<string, string> {
+  const h: Record<string, string> = { accept: "application/vnd.github+json", "user-agent": UA };
+  if (process.env.GITHUB_TOKEN) h.authorization = `Bearer ${process.env.GITHUB_TOKEN}`;
+  return h;
 }
 
-function brandPattern(brand: string) {
-  const w = brand.toLowerCase().match(/[a-z0-9]+/g);
-  return w ? new RegExp(`(?<![a-z0-9])${w.map((x) => x.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("[^a-z0-9]{1,3}")}(?![a-z0-9])`, "gi") : null;
+async function gh(path: string): Promise<any> {
+  const res = await fetch(`${GH}${path}`, { headers: headers(), cache: "no-store" });
+  if (res.status === 404) return null;
+  if (!res.ok) throw new Error(res.status === 403 ? "GitHub's rate limit was reached; try again in a few minutes" : `GitHub answered ${res.status}`);
+  return res.json();
 }
 
-function transcriptText(body: string, kind: string): string {
-  if (kind.includes("json")) {
-    try {
-      return (JSON.parse(body).segments ?? []).map((s: any) => String(s?.body ?? "")).join(" ").replace(/\s+/g, " ").trim();
-    } catch {
-      return "";
-    }
+const version = (t: string) => (t.match(/(\d+(?:\.\d+)+)/)?.[1] ?? "").split(".").filter(Boolean).map(Number);
+const atLeast = (a: number[], b: number[]) => {
+  const n = Math.max(a.length, b.length);
+  for (let i = 0; i < n; i++) {
+    const x = a[i] ?? 0, y = b[i] ?? 0;
+    if (x !== y) return x > y;
   }
-  if (kind.includes("html")) return decode(body.replace(/<(script|style|noscript)[^>]*>[\s\S]*?<\/\1>/gi, " ").replace(/<[^>]+>/g, " ")).replace(/\s+/g, " ").trim();
-  return body
-    .split(/\r?\n/)
-    .map((l) => l.trim())
-    .filter((l) => l && !l.includes("-->") && !/^\d+$/.test(l) && !/^(WEBVTT|NOTE|STYLE)/.test(l))
-    .map((l) => l.replace(/<[^>]+>/g, ""))
-    .join(" ")
-    .replace(/\s+/g, " ")
-    .trim();
-}
+  return true;
+};
+const cmp = (a: number[], b: number[]) => (atLeast(a, b) ? (atLeast(b, a) ? 0 : 1) : -1);
+const host = (u: string) => (u.trim().toLowerCase().match(/^https?:\/\/(?:www\.)?([^/:?#]+)/) ?? [])[1] ?? "";
 
-async function get(url: string, timeoutMs = 20_000): Promise<Response> {
-  const ctrl = new AbortController();
-  const timer = setTimeout(() => ctrl.abort(), timeoutMs);
-  try {
-    return await fetch(url, { headers: HEADERS, cache: "no-store", signal: ctrl.signal });
-  } finally {
-    clearTimeout(timer);
-  }
+/** "owner/repo#123", "owner/repo 123" or a github.com issue link. */
+function parse(q: string): { repo: string; n: number } | null {
+  const m = q.trim().match(/(?:github\.com\/)?([A-Za-z0-9][A-Za-z0-9-]{0,38}\/[A-Za-z0-9._-]{1,100}?)(?:\/issues\/|#|\s+)(\d{1,9})\b/);
+  return m ? { repo: m[1], n: Number(m[2]) } : null;
 }
 
 export async function GET(request: Request) {
   const q = new URL(request.url).searchParams;
-  const feed = (q.get("feed") ?? "").trim();
+  const parsed = parse(q.get("q") ?? "");
   const appleId = (q.get("apple") ?? "").trim();
-  const brand = (q.get("brand") ?? "").trim().slice(0, 60);
-  const code = (q.get("code") ?? "").trim().slice(0, 40);
-  if (!/^https?:\/\/\S{4,300}$/.test(feed)) return Response.json({ error: "Paste the show's RSS feed URL" }, { status: 400 });
+  const prefix = (q.get("prefix") ?? "").trim();
+  if (!parsed) return Response.json({ error: "Paste a GitHub issue, like github.com/Dimillian/IceCubesApp/issues/2512" }, { status: 400 });
+  const { repo, n } = parsed;
   try {
-    const res = await get(feed);
-    if (!res.ok) return Response.json({ error: `The feed answered ${res.status}` }, { status: 502 });
-    const xml = await res.text();
-    const [head, ...rest] = xml.split(/<item[\s>]/i);
-    const items = rest.map((r) => r.split(/<\/item>/i)[0]).slice(0, MAX_EPISODES);
-    const title = tag(head, "title");
-    const txt = [...head.matchAll(/<podcast:txt[^>]*purpose="genlayer"[^>]*>\s*(?:<!\[CDATA\[)?\s*(0x[0-9a-fA-F]{40})/gi)].map((m) => m[1].toLowerCase());
-    const desc = `${tag(head, "description")} ${tag(head, "itunes:summary")}`;
-    const lines = [...desc.matchAll(/genlayer[^0-9a-zA-Z]{0,24}(?:wallet|address)?[^0-9a-zA-Z]{0,8}(0x[0-9a-fA-F]{40})/gi)].map((m) => m[1].toLowerCase());
-    const found = new Set(txt.length ? txt : lines);
+    const [r, issue] = await Promise.all([gh(`/repos/${repo}`), gh(`/repos/${repo}/issues/${n}`)]);
+    if (!r) return Response.json({ error: `GitHub has no repository ${repo}` }, { status: 404 });
+    if (!issue || issue.pull_request) return Response.json({ error: `${repo} has no issue #${n}` }, { status: 404 });
+    const preview: IssuePreview = {
+      repo: r.full_name, number: n, title: issue.title, state: issue.state, reason: issue.state_reason ?? "", url: issue.html_url,
+      app: null, change: null, release: null, shipped: false, wallet: "", note: "",
+    };
 
-    // Apple: the given id, or a search by the show's title, kept only if Apple's record points at this exact feed.
-    let apple: ShowPreview["apple"] = null;
-    let appleEpisodes: any[] = [];
-    // Apple sometimes keeps a duplicate record of a show (same feed, no episodes): try each match, keep one with episodes.
-    let ids = /^\d{4,12}$/.test(appleId) ? [appleId] : [];
-    if (!ids.length && title) {
-      const s = await get(`https://itunes.apple.com/search?entity=podcast&limit=10&term=${encodeURIComponent(title.slice(0, 80))}`).then((r) => (r.ok ? r.json() : null)).catch(() => null);
-      ids = (s?.results ?? []).filter((r: any) => norm(String(r.feedUrl ?? "")) === norm(feed)).map((r: any) => String(r.collectionId)).slice(0, 3);
+    // The App Store app the repository names: an id in its homepage or README, or the one given.
+    let id = /^\d{6,12}$/.test(appleId) ? appleId : "";
+    let how = "";
+    const idIn = (t: string) => t.match(/(?:apps|itunes)\.apple\.com\/[^\s)"']*id(\d{6,12})(?!\d)/i)?.[1] ?? "";
+    if (idIn(r.homepage ?? "")) [id, how] = [id || idIn(r.homepage), id && idIn(r.homepage) !== id ? "" : "homepage"];
+    if (!how) {
+      const readme = await fetch(`https://raw.githubusercontent.com/${repo}/HEAD/README.md`, { headers: { "user-agent": UA }, cache: "no-store" }).then((x) => (x.ok ? x.text() : ""));
+      const found = idIn(readme);
+      if (found && (!id || found === id)) [id, how] = [found, "readme"];
     }
-    for (const id of ids) {
-      const a = await get(`https://itunes.apple.com/lookup?id=${id}&entity=podcastEpisode&limit=200`).then((r) => (r.ok ? r.json() : null)).catch(() => null);
-      const show = (a?.results ?? []).find((r: any) => r.kind === "podcast");
-      if (!show) continue;
-      const eps = (a.results ?? []).filter((r: any) => r.kind === "podcast-episode");
-      if (!apple || (eps.length && !appleEpisodes.length)) {
-        apple = { id, name: String(show.collectionName ?? ""), feed: String(show.feedUrl ?? ""), same: norm(String(show.feedUrl ?? "")) === norm(feed) };
-        appleEpisodes = eps;
+    if (id) {
+      const a = await fetch(`https://itunes.apple.com/lookup?id=${id}`, { cache: "no-store" }).then((x) => x.json()).catch(() => null);
+      const app = (a?.results ?? []).find((x: any) => x.kind === "software");
+      if (app) {
+        if (!how && host(r.homepage ?? "") && host(r.homepage) === host(app.sellerUrl ?? "")) how = "seller_url";
+        preview.app = { id, name: app.trackName, version: app.version, released: String(app.currentVersionReleaseDate ?? "").slice(0, 19), how };
       }
-      if (eps.length) break;
     }
 
-    const pat = brand ? brandPattern(brand) : null;
-    let fetched = 0;
-    const episodes: ShowPreview["episodes"] = [];
-    for (const it of items) {
-      const guid = tag(it, "guid");
-      const epTitle = tag(it, "title");
-      const published = rfc822(tag(it, "pubDate"));
-      const audio = attrs(it.match(/<enclosure\s[^>]*>/i)?.[0] ?? "").url ?? "";
-      const trs = [...it.matchAll(/<podcast:transcript\s[^>]*>/gi)].map((m) => attrs(m[0]));
-      const best = trs
-        .map((t) => ({ url: t.url ?? "", type: (t.type ?? "").split(";")[0].trim().toLowerCase() }))
-        .filter((t) => TYPES.includes(t.type) && /^https?:\/\//.test(t.url))
-        .sort((x, y) => TYPES.indexOf(x.type) - TYPES.indexOf(y.type))[0] ?? null;
-      const bare = (u: string) => u.split("?")[0].trim().toLowerCase();
-      const ap =
-        appleEpisodes.find((e) => e.episodeGuid && e.episodeGuid === guid) ? "guid"
-        : appleEpisodes.find((e) => audio && bare(String(e.episodeUrl ?? "")) === bare(audio)) ? "audio"
-        : appleEpisodes.find((e) => {
-            const a = words(String(e.trackName ?? "")).trim(), b = words(epTitle).trim();
-            return Math.min(a.length, b.length) >= 6 && (a.includes(b) || b.includes(a)) && Math.abs(Date.parse(e.releaseDate) - Date.parse(`${published}Z`)) <= 2 * 86_400_000;
-          }) ? "title" : "";
-      let mentions: number | null = null, codeFound: boolean | null = null, excerpt = "";
-      if (pat && best && fetched < MAX_TRANSCRIPTS) {
-        fetched++;
-        const body = await get(best.url).then((r) => (r.ok ? r.text() : "")).catch(() => "");
-        const text = transcriptText(body, best.type);
-        if (text) {
-          const ms = [...text.matchAll(pat)];
-          mentions = ms.length;
-          codeFound = code ? alnum(text).includes(alnum(code)) : null;
-          const cue = ms.find((m) => /sponsor|brought to you|supported by|thanks to|promo code|use (the )?code/i.test(text.slice(Math.max(0, m.index! - 200), m.index! + 200))) ?? ms[0];
-          if (cue) excerpt = text.slice(Math.max(0, cue.index! - 120), cue.index! + 280);
+    if (issue.state === "closed") {
+      const timeline: any[] = (await gh(`/repos/${repo}/issues/${n}/timeline?per_page=100`)) ?? [];
+      const closed = timeline.filter((e) => e.event === "closed").at(-1);
+      let sha = closed?.commit_id ?? "";
+      let pr: any = null;
+      if (sha) pr = ((await gh(`/repos/${repo}/commits/${sha}/pulls`)) ?? []).find((p: any) => p.merged_at) ?? null;
+      else {
+        const rx = new RegExp(`\\b(close[sd]?|fix(e[sd])?|resolve[sd]?)\\b[: ]+(?:[\\w.-]+/[\\w.-]+)?#${n}\\b`, "i");
+        const x = timeline.find((e) => e.event === "cross-referenced" && e.source?.issue?.pull_request?.merged_at && rx.test(`${e.source.issue.title}\n${e.source.issue.body ?? ""}`));
+        if (x) {
+          pr = await gh(`/repos/${repo}/pulls/${x.source.issue.number}`);
+          sha = pr?.merge_commit_sha ?? "";
         }
       }
-      episodes.push({ guid, title: epTitle, published, transcript: best, apple: ap, mentions, codeFound, excerpt });
+      if (sha) {
+        let author = pr?.user?.login ?? "";
+        let merged = String(pr?.merged_at ?? "").slice(0, 19);
+        let title = pr?.title ?? "";
+        if (!pr) {
+          const c = await gh(`/repos/${repo}/commits/${sha}`);
+          author = c?.author?.login ?? "";
+          merged = String(c?.commit?.committer?.date ?? "").slice(0, 19);
+          title = String(c?.commit?.message ?? "").split("\n")[0];
+        }
+        preview.change = { kind: pr ? "pr" : "commit", number: pr?.number ?? 0, sha, title, author, merged_at: merged,
+          url: pr ? pr.html_url : `https://github.com/${repo}/commit/${sha}` };
+        const live = preview.app ? version(preview.app.version) : [];
+        const releases: any[] = ((await gh(`/repos/${repo}/releases?per_page=30`)) ?? [])
+          .filter((x: any) => !x.draft && !x.prerelease && String(x.tag_name).startsWith(prefix) && version(x.tag_name).length && String(x.published_at).slice(0, 10) >= merged.slice(0, 10))
+          .sort((x: any, y: any) => cmp(version(x.tag_name), version(y.tag_name)));
+        const have = releases.filter((x) => live.length && atLeast(live, version(x.tag_name)));
+        const target = have.at(-1);
+        if (target) {
+          preview.release = { tag: target.tag_name, published: String(target.published_at).slice(0, 19) };
+          const comparison = await gh(`/repos/${repo}/compare/${encodeURIComponent(target.tag_name)}...${sha}`);
+          preview.shipped = ["behind", "identical"].includes(comparison?.status) && !!preview.app && preview.app.released >= merged;
+        }
+        if (author) {
+          const u = await gh(`/users/${author}`);
+          const w = [...String(u?.bio ?? "").matchAll(/genlayer[^0-9a-zA-Z]{0,24}(?:wallet|address)?[^0-9a-zA-Z]{0,8}(0x[0-9a-fA-F]{40})/gi)].map((m) => m[1].toLowerCase());
+          preview.wallet = new Set(w).size === 1 ? w[0] : "";
+        }
+      }
     }
-    const preview: ShowPreview = { feed, title, wallet: found.size === 1 ? [...found][0] : "", apple, episodes };
+    preview.note =
+      issue.state !== "closed" ? "Open: a bounty now pays a fix merged later, once it is in the App Store."
+      : issue.state_reason !== "completed" ? "Closed as not planned: a claim would be refused."
+      : !preview.change ? "No commit or merged PR closed it: a claim would be refused."
+      : preview.shipped ? "Fixed, released and live in the App Store: a bounty opened now is retroactive and can be claimed at once (the model then reads the change against the issue)."
+      : "Fixed, but the App Store does not have it yet: a claim would wait.";
     return Response.json(preview, { headers: { "Cache-Control": "public, s-maxage=120, stale-while-revalidate=600" } });
   } catch (err: any) {
-    return Response.json({ error: err?.name === "AbortError" ? "The feed took too long to answer" : err?.message ?? String(err) }, { status: 502, headers: { "Cache-Control": "no-store" } });
+    return Response.json({ error: err?.message ?? String(err) }, { status: 502, headers: { "Cache-Control": "no-store" } });
   }
 }
