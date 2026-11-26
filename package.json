@@ -1,0 +1,8 @@
+{
+  "name": "genlayer-shipbounty",
+  "type": "module",
+  "private": true,
+  "devDependencies": {
+    "genlayer-js": "2.0.0"
+  }
+}
