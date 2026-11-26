@@ -79,6 +79,9 @@ in [`docs/REPRODUCTION.md`](docs/REPRODUCTION.md).
   name that app), a second dispute of the same claim, sending a payment before the author has a wallet, refunding a
   bounty before its deadline, backing a bounty already paid out.
 - `totals()` matched the contract's on-chain balance at **every** step, the last after the funder's withdrawal finalized.
+- **A MetaMask test from the live app** (`docs/ui-test.json`): the tester opened their own retroactive bounty on Ice
+  Cubes #2511 (`bounty_7`), claimed it (**SHIPPED**: PR #2513, in 2.1.6), confirmed it (held for the author's wallet)
+  and backed `bounty_6`. Six transactions, all finalized; the books matched afterwards.
 - GitHub's keyless limit refused a reading eight times during the run (the transaction is refused, nothing taken); each
   was sent again 15 minutes later and went through.
 

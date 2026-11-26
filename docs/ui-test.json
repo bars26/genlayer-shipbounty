@@ -1,0 +1,42 @@
+{
+  "note": "A MetaMask test from the live app (shipbounty-bars26.vercel.app) on 2026-11-26. The tester checked Ice Cubes #2511 (the posting progress timer kept running after submission) in the issue preview, opened a retroactive 0.2 GEN bounty on it (bounty_7), claimed it (SHIPPED: PR #2513 by ivan-magda, in release 2.1.6, App Store 2.1.6, the model FULL) and confirmed it (issue still closed, App Store still 2.1.6; no GenLayer wallet in the author's GitHub bio yet, so 0.2 GEN is held for them), then added 0.1 GEN to bounty_6. Six transactions, all FINALIZED with SUCCESS; afterwards totals() (4.9 GEN: pots 1.6 + reserved 0.5 + held 2.8) matched the contract's balance.",
+  "wallet": "0x4f80b5c475fced34fc9a07ffccf39e1adc1406bf",
+  "steps": [
+    [
+      "deposit() for the bounty",
+      "0.2",
+      "SUCCESS: 0.2 GEN credited",
+      "0x25b5b8b39a02577ef5911279ae2f8e7a425a5cb68679f0a8f89a51375bf47534"
+    ],
+    [
+      "open_bounty(\"Dimillian/IceCubesApp\", 2511, \"6444915884\", \"\", \"2027-01-25\", 7, 0.2 GEN)",
+      "0",
+      "SUCCESS: bounty_7, retroactive (the issue was already fixed)",
+      "0xf4e54a4d1487b646f107b4a2c6166a265690234492c6851c38dd6f306fbc141e"
+    ],
+    [
+      "claim(\"bounty_7\")",
+      "0",
+      "SHIPPED: PR #2513, release 2.1.6, App Store 2.1.6, model FULL; 0.2 GEN reserved",
+      "0xd5374f09e73a0bcf57c2e1959b2c1e4f89158b873e0fa978017d543003081378"
+    ],
+    [
+      "confirm(\"claim_7\")",
+      "0",
+      "SUCCESS: awaiting_wallet (still closed, still in the App Store; no wallet in ivan-magda's bio yet)",
+      "0x8aedbeb18609c59efe9691a10001f9e1e807328d894e2a7ee80211199359cd18"
+    ],
+    [
+      "deposit() to back another bounty",
+      "0.1",
+      "SUCCESS: 0.1 GEN credited",
+      "0xee5d80df903d9a926d9cc6e52856f78e1d9cff427186f9c74c6af9dc967bc17d"
+    ],
+    [
+      "back(\"bounty_6\", 0.1 GEN)",
+      "0",
+      "SUCCESS: bounty_6 now 0.6 GEN from two backers",
+      "0x33b6d0f8225b5f4f32f47752d1c3928ee8ac2f041879d70449cde5a68d2c39ca"
+    ]
+  ]
+}
