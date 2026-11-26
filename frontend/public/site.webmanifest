@@ -1,0 +1,10 @@
+{
+  "name": "ShipBounty",
+  "short_name": "ShipBounty",
+  "description": "Rewards for OpenStreetMap opening-hours fixes, checked by GenLayer validators against the business's own page",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#F3F6FA",
+  "theme_color": "#F3F6FA",
+  "icons": [{ "src": "/favicon.svg", "sizes": "any", "type": "image/svg+xml" }]
+}

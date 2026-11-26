@@ -59,7 +59,8 @@ def _setup(vm, issue=None, timeline=None, pulls=None, commit=None, releases=None
            issue_status=200, releases_status=200, apple_status=200, extra=()):
     vm.clear_mocks()
     _web(vm, f"{GH}/repos/{REPO}", repo or {"full_name": REPO, "homepage": "https://icecream.app", "archived": False})
-    _web(vm, f"{GH}/repos/{REPO}/readme", readme, 200 if readme is not None else 404)
+    _web(vm, f"https://raw.githubusercontent.com/{REPO}/HEAD/README.md", readme or "", 200 if readme is not None else 404)
+    _web(vm, f"{GH}/repos/{REPO}/readme", readme or "", 200 if readme is not None else 404)
     _web(vm, APPLE, app or _app(), apple_status)
     _web(vm, f"{GH}/repos/{REPO}/issues/{N}", issue or _issue(), issue_status)
     _web(vm, f"{GH}/repos/{REPO}/issues/{N}/timeline?per_page=100", timeline if timeline is not None else _timeline())
@@ -150,6 +151,17 @@ def test_a_bounty_on_an_open_issue_is_prospective(direct_vm, direct_deploy, dire
     assert c.get_bounty(bid).retro is False
 
 
+def test_a_readme_only_the_api_serves_counts(direct_vm, direct_deploy, direct_alice):
+    _at(direct_vm, NOW)
+    direct_vm.sender = direct_alice
+    c = direct_deploy(CONTRACT_PATH)
+    _deposit(direct_vm, c, direct_alice, AMOUNT)
+    _setup(direct_vm, app=_app(seller="https://other.example"))
+    _web(direct_vm, f"https://raw.githubusercontent.com/{REPO}/HEAD/README.md", "", 404)  # README.rst, say
+    bid = c.open_bounty(REPO, N, APPLE_ID, "", "2027-01-31", 7, AMOUNT)
+    assert json.loads(c.get_bounty(bid).history_json)[0]["link"] == "readme"
+
+
 @pytest.mark.parametrize("setup, how", [
     (dict(readme="no link here", repo={"full_name": REPO, "homepage": f"https://apps.apple.com/app/id{APPLE_ID}", "archived": False}), "homepage"),
     (dict(readme="no link here"), "seller_url"),  # the repo's homepage is the app's seller website
@@ -217,13 +229,13 @@ def test_a_shipped_fix_reserves_the_pot(direct_vm, direct_bob, retro):
     _balance(c)
 
 
-def test_the_first_release_containing_the_change_counts(direct_vm, direct_bob, retro):
+def test_the_release_users_have_must_contain_the_change(direct_vm, direct_bob, retro):
     c, bid = retro
     releases = [_release("2.1.6", "2026-10-13T18:25:39Z"), _release("2.1.5", "2026-10-12T20:00:00Z"), _release("2.1.4", "2026-10-08T06:00:00Z")]
     cid = _claim(direct_vm, c, bid, direct_bob, releases=releases, compare={"2.1.6": "behind", "2.1.5": "identical", "2.1.4": "ahead"},
                  app=_app("2.1.5", "2026-10-13T08:00:00Z"))
     cl = c.get_claim(cid)
-    assert (cl.verdict, cl.version) == ("SHIPPED", "2.1.5")  # 2.1.4 predates the merge and is not compared
+    assert (cl.verdict, cl.version) == ("SHIPPED", "2.1.5")  # the App Store has 2.1.5; 2.1.4 predates the merge
 
 
 def test_a_commit_without_a_pull_request_counts(direct_vm, direct_bob, retro):
@@ -432,6 +444,6 @@ def test_an_uncollected_payment_returns_to_the_backers_after_90_days(direct_vm, 
     ("v2026.11.0-bwpm", "2026.11.1", True), ("2026.08", "2026.08", True), ("2.1.6", "2.1.5", False), ("2.1", "2.1.0", True),
     ("build-355", "2.1.6", False),
 ])
-def test_check_versions(retro, tag, app, shipped):
+def test_check_versions(retro, tag, app, shipped):  # noqa: D103
     c, _ = retro
     assert json.loads(c.check_versions(tag, app))["shipped"] is shipped

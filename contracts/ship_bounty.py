@@ -2,7 +2,7 @@
 """ShipBounty: bounties on GitHub issues of open-source iOS apps, paid when the fix ships in the App Store.
 
 Backers put GEN on an issue. When it is closed, anyone claims. Every validator reads GitHub (the issue, closed as
-completed; the commit or merged pull request that closed it; the first published release that contains that change)
+completed; the commit or merged pull request that closed it; the published release the App Store's version corresponds to, which must contain that change)
 and Apple's public App Store lookup (the app's current version must be that release or newer, so users actually have
 it), and the model reads the change against the issue (does it deliver what was asked?). A shipped claim is paid,
 after a survival period and a stake-backed dispute window, to the GenLayer wallet the change's author declares in
@@ -77,7 +77,7 @@ _DAY = 86400
 _MAX_DAYS = 365
 _MAX_SURVIVAL_DAYS = 60
 _HOLD_AFTER_DAYS = 90  # an uncollected payment is held this long after confirmation
-_RELEASES_CHECKED = 6  # releases compared with the change, oldest eligible first
+_RAWGH = "https://raw.githubusercontent.com"
 _HISTORY_LIMIT = 16
 _GH = "https://api.github.com"
 _APPLE = "https://itunes.apple.com/lookup"
@@ -212,7 +212,10 @@ def repo_app_link(repo: str, apple_id: str) -> dict:
     if idref.search(homepage):
         how = "homepage"
     else:
-        ds, readme = _get(f"{_GH}/repos/{repo}/readme", headers=_RAW, raw=True)
+        # The README from raw.githubusercontent.com (outside the API's 60-requests-an-hour limit), else from the API.
+        ds, readme = _get(f"{_RAWGH}/{repo}/HEAD/README.md", headers={"user-agent": _HEADERS["user-agent"]}, raw=True)
+        if ds == "none":
+            ds, readme = _get(f"{_GH}/repos/{repo}/readme", headers=_RAW, raw=True)
         if ds == "error":
             return {"state": "error", "what": "readme"}
         if ds == "ok" and idref.search(readme or ""):
@@ -264,9 +267,19 @@ def _change(repo: str, number: int, issue: dict) -> tuple:
                   "merged_at": str(((commit.get("commit") or {}).get("committer") or {}).get("date") or "")[:19]}
 
 
-def _release(repo: str, sha: str, merged_at: str, prefix: str) -> tuple:
-    """The first published release (tag starting with `prefix`) that contains the change, checking at most six
-    releases published on or after the day it was merged, oldest first. ("ok", release | {}) / ("error", None)."""
+def _contains(repo: str, tag: str, sha: str) -> str:
+    """"yes" / "no" / "error": is the commit in the tag's history (GitHub's compare of the tag with the commit)?"""
+    cs, cmp = _get(f"{_GH}/repos/{repo}/compare/{tag}...{sha}")
+    if cs == "error":
+        return "error"
+    return "yes" if cs == "ok" and cmp.get("status") in ("behind", "identical") else "no"
+
+
+def _release(repo: str, sha: str, merged_at: str, prefix: str, live) -> tuple:
+    """Which published release (tag starting with `prefix`, published on or after the day the change was merged)
+    users have: the newest one whose version is at most the App Store's `live` version. ("ok", {release, contains,
+    newer_contains}) / ("error", None). At most two compares, to stay within GitHub's keyless limits: the release users
+    have, and (if the change is not in it) the newest release, to tell "not in the App Store yet" from "not released"."""
     rs, releases = _get(f"{_GH}/repos/{repo}/releases?per_page=30")
     if rs != "ok" or not isinstance(releases, list):
         return "error", None
@@ -274,15 +287,24 @@ def _release(repo: str, sha: str, merged_at: str, prefix: str) -> tuple:
         [r for r in releases if isinstance(r, dict) and not r.get("draft") and not r.get("prerelease")
          and str(r.get("tag_name") or "").startswith(prefix) and version_of(str(r.get("tag_name") or ""))
          and str(r.get("published_at") or "")[:10] >= merged_at[:10]],
-        key=lambda r: str(r.get("published_at") or ""))
-    for r in eligible[:_RELEASES_CHECKED]:
+        key=lambda r: (version_of(str(r["tag_name"])), str(r.get("published_at") or "")))
+    have = [r for r in eligible if live and newer_or_same(live, version_of(str(r["tag_name"])))]
+    out = {"release": {}, "contains": False, "newer_contains": False}
+    if have:
+        r = have[-1]
         tag = str(r["tag_name"])
-        cs, cmp = _get(f"{_GH}/repos/{repo}/compare/{tag}...{sha}")
-        if cs == "error":
+        out["release"] = {"tag": tag[:80], "published": str(r.get("published_at") or "")[:19], "version": ".".join(map(str, version_of(tag)))}
+        c = _contains(repo, tag, sha)
+        if c == "error":
             return "error", None
-        if cs == "ok" and cmp.get("status") in ("behind", "identical"):
-            return "ok", {"tag": tag[:80], "published": str(r.get("published_at") or "")[:19], "version": ".".join(map(str, version_of(tag)))}
-    return "ok", {}
+        out["contains"] = c == "yes"
+    newer = [r for r in eligible if r not in have]
+    if not out["contains"] and newer:
+        c = _contains(repo, str(newer[-1]["tag_name"]), sha)
+        if c == "error":
+            return "error", None
+        out["newer_contains"] = c == "yes"
+    return "ok", out
 
 
 def _judge(issue_title: str, issue_body: str, change: dict) -> dict:
@@ -319,8 +341,9 @@ Respond only with that JSON, without any prefix or suffix.
 
 
 def read_claim(repo: str, number: int, apple_id: str, prefix: str, opened_at: str, retro: bool) -> dict:
-    """One validator's ruling: the issue (closed as completed), the change that closed it, the first release that
-    contains it, the App Store's current version (that release or newer), and the model's reading of the change."""
+    """One validator's ruling: the issue (closed as completed), the change that closed it, the App Store's current
+    version, the published release that version corresponds to (which must contain the change), and the model's reading
+    of the change."""
     st, issue = _get(f"{_GH}/repos/{repo}/issues/{number}")
     if st != "ok":
         return {"state": st, "what": "issue"}
@@ -348,20 +371,20 @@ def read_claim(repo: str, number: int, apple_id: str, prefix: str, opened_at: st
         return rule(INELIGIBLE, "no_author")
     if not retro and change["merged_at"] < opened_at:
         return rule(INELIGIBLE, "before_bounty")
-    rs, release = _release(repo, change["sha"], change["merged_at"], prefix)
-    if rs != "ok":
-        return {"state": "error", "what": "releases"}
-    facts["release"] = release
-    if not release:
-        return rule(UNCLEAR, "not_released")
     ast, app = apple_app(apple_id)
     if ast != "ok":
         return {"state": "error", "what": "apple"}
     facts["app"] = {"version": app["version"], "released": app["released"]}
     live = version_of(app["version"])
-    # The App Store's build must be that release or newer, and released after the change was merged: a tag can be
-    # created after the App Store build with the same number (the build then predates the change).
-    if not live or not newer_or_same(live, version_of(release["version"])) or app["released"] < change["merged_at"]:
+    rs, rel = _release(repo, change["sha"], change["merged_at"], prefix, live)
+    if rs != "ok":
+        return {"state": "error", "what": "releases"}
+    facts["release"] = rel["release"]
+    if not rel["contains"]:
+        return rule(UNCLEAR, "not_in_app_store" if rel["newer_contains"] else "not_released")
+    # The App Store's build must also be released after the change was merged: a tag can be created after the App
+    # Store build with the same number (the build then predates the change).
+    if app["released"] < change["merged_at"]:
         return rule(UNCLEAR, "not_in_app_store")
     judged = _judge(facts["title"], str(issue.get("body") or "")[:3000], change)
     out["judged"] = judged
@@ -428,7 +451,7 @@ CODE_TEXT = {
     "no_author": "The change has no GitHub author to pay",
     "before_bounty": "The change was merged before the bounty was opened (a bounty on an open issue pays later work)",
     "not_released": "No published release contains the change yet",
-    "not_in_app_store": "The App Store does not offer the release with the change yet",
+    "not_in_app_store": "A release contains the change, but the App Store does not offer it yet",
     "not_delivered": "The change does not do what the issue asked",
     "partial": "The change only partly does what the issue asked",
 }
@@ -603,7 +626,7 @@ class ShipBounty(_Contract):
             text += f" {what} by {ch.get('author')} ({ch.get('title', '')[:100]}), merged {ch.get('merged_at', '').replace('T', ' ')} UTC."
         rel = f.get("release") or {}
         if rel.get("tag"):
-            text += f" First in release {rel['tag']}."
+            text += f" In release {rel['tag']}."
         app = f.get("app") or {}
         if app.get("version"):
             text += f" App Store: {app['version']} since {app.get('released', '')[:10]}."
