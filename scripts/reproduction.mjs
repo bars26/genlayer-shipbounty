@@ -16,8 +16,8 @@ const change = (repo, c) =>
   c ? `[${c.kind === "pr" ? `PR #${c.number}` : `commit ${c.sha.slice(0, 8)}`}](${c.kind === "pr" ? `${gh(repo)}/pull/${c.number}` : `${gh(repo)}/commit/${c.sha}`}) by ${esc(c.author)}, merged ${c.merged_at.replace("T", " ")}` : "—";
 
 const bounties = Object.values(run.bounties).map((b) => {
-  const backers = js(b.backers_json);
-  return `| ${b.id} | [${esc(b.repo)}#${b.issue}](${gh(b.repo)}/issues/${b.issue}): ${esc(b.title)} | [${esc(b.app)}](https://apps.apple.com/app/id${b.apple_id}) | ${b.retro ? "yes" : "no"} | ${b.deadline}, ${b.survival_days} days | ${Array.isArray(backers) ? backers.length : 0} | ${gen(BigInt(b.pot) + BigInt(b.reserved) + BigInt(b.paid_total))} | ${b.state} |`;
+  const backers = Array.isArray(js(b.backers_json)) ? js(b.backers_json) : [];
+  return `| ${b.id} | [${esc(b.repo)}#${b.issue}](${gh(b.repo)}/issues/${b.issue}): ${esc(b.title)} | [${esc(b.app)}](https://apps.apple.com/app/id${b.apple_id}) | ${b.retro ? "yes" : "no"} | ${b.deadline}, ${b.survival_days} days | ${backers.length} | ${gen(backers.reduce((t, [, a]) => t + BigInt(a), 0n))} | ${b.state === "paid" && run.claims[b.claim_id]?.state === "awaiting_wallet" ? "confirmed: payment held for the author's wallet" : b.state} |`;
 });
 
 const claims = Object.values(run.claims).map((c) => {
@@ -82,7 +82,7 @@ issues, pull requests, commits, releases and App Store versions are real.
 
 ## The bounties
 
-| Bounty | Issue | App | Retroactive | Deadline, survival | Backers | Total | State |
+| Bounty | Issue | App | Retroactive | Deadline, survival | Backers | Backed | State |
 |---|---|---|---|---|---|---|---|
 ${bounties.join("\n")}
 

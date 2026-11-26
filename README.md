@@ -65,7 +65,22 @@ offers to these developers) on real issues of [Ice Cubes](https://github.com/Dim
 [official Mastodon iOS app](https://github.com/mastodon/mastodon-ios). Every transaction, ruling and reconciliation is
 in [`docs/REPRODUCTION.md`](docs/REPRODUCTION.md).
 
-<!-- RESULTS -->
+| Claim | Issue (real) | Ruling |
+|---|---|---|
+| `claim_0` | Ice Cubes #2512, blocked and muted lists repeat the first page: PR #2514 by ivan-magda, in release 2.1.6, App Store 2.1.6 | **SHIPPED**; disputed, **dismissed** (the stake joined the payment); confirmed, 1.1 GEN held for the author's wallet |
+| `claim_1` | Ice Cubes #2469, the Mac app doesn't display quoted posts (two backers): PR #2472, merged in August, in 2.1.6 | **SHIPPED**; confirmed, held for the author |
+| `claim_2` | Mastodon #511, "always expand content warnings" not working: closed by commit c2990666 (no pull request), release 2026.08, App Store 2026.08 | **SHIPPED**; confirmed, held for the author |
+| `claim_3` | Mastodon #297, a "show all media" setting: closed by the same commit | **SHIPPED** (the model found the commit also honours the media preference); reserved |
+| `claim_4` | Mastodon #1554, refreshing notifications: closed as completed, but no commit or merged PR closed it | INELIGIBLE `no_change` |
+| `claim_5` | Mastodon #1575: closed as not planned | INELIGIBLE `not_completed` |
+| `claim_6` | Ice Cubes #2551: still open | INELIGIBLE `not_closed` |
+
+- **Refused, taking nothing:** a bounty on NetNewsWire's repository with Ice Cubes' App Store id (the repository does not
+  name that app), a second dispute of the same claim, sending a payment before the author has a wallet, refunding a
+  bounty before its deadline, backing a bounty already paid out.
+- `totals()` matched the contract's on-chain balance at **every** step, the last after the funder's withdrawal finalized.
+- GitHub's keyless limit refused a reading eight times during the run (the transaction is refused, nothing taken); each
+  was sent again 15 minutes later and went through.
 
 ## Who can do what (and the attacks this blocks)
 

@@ -118,8 +118,9 @@ export function BountyCard({ bounty: b, claims, highlight }: { bounty: Bounty; c
   const net = currentNetwork();
   const ordered = [...claims].sort((x, y) => Number(y.id.split("_")[1]) - Number(x.id.split("_")[1]));
   const open = b.state === "open" && todayUtc() <= b.deadline;
-  const total = wei(b.pot) + wei(b.reserved);
   const backers = backersOf(b);
+  const backed = backers.reduce((t, [, a]) => t + wei(a), 0n);
+  const held = claims.filter((c) => c.state === "awaiting_wallet").reduce((t, c) => t + wei(c.amount) + wei(c.bonus), 0n);
   const extra = parseGen(more);
   return (
     <article className={`brand-card overflow-hidden ${highlight ? "ring-2 ring-[#0A84FF]" : ""}`}>
@@ -146,17 +147,17 @@ export function BountyCard({ bounty: b, claims, highlight }: { bounty: Bounty; c
         </p>
         <dl className="grid grid-cols-3 gap-2 text-xs pt-1">
           <div className="rounded-lg bg-muted/60 p-2">
-            <dt className="text-muted-foreground">bounty</dt>
-            <dd className="display text-xl">{formatGen(total + wei(b.paid_total), 3)} GEN</dd>
+            <dt className="text-muted-foreground">backed</dt>
+            <dd className="display text-xl">{formatGen(backed, 3)} GEN</dd>
           </div>
           <div className="rounded-lg bg-muted/60 p-2">
             <dt className="text-muted-foreground">backers</dt>
             <dd className="display text-xl">{backers.length}</dd>
           </div>
           <div className="rounded-lg bg-muted/60 p-2">
-            <dt className="text-muted-foreground">paid / returned</dt>
+            <dt className="text-muted-foreground">{held > 0n ? "held for the author" : "paid / returned"}</dt>
             <dd className="display text-xl">
-              {formatGen(b.paid_total, 2)} / {formatGen(b.returned_total, 2)}
+              {held > 0n ? `${formatGen(held, 3)} GEN` : `${formatGen(b.paid_total, 2)} / ${formatGen(b.returned_total, 2)}`}
             </dd>
           </div>
         </dl>
